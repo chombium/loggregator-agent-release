@@ -138,11 +138,24 @@ func NewSyslogAgent(
 
 func drainTLSConfig(cfg Config) (*tls.Config, *tls.Config) {
 	certPool := trustedCertPool(cfg.DrainTrustedCAFile)
-	internalTlsConfig, err := tlsconfig.Build(
-		tlsconfig.WithInternalServiceDefaults(),
-	).Client(
-		tlsconfig.WithAuthority(certPool),
-	)
+	var internalTlsConfig *tls.Config
+	var err error
+
+	if cfg.DrainUseMtls {
+		internalTlsConfig, err = tlsconfig.Build(
+			tlsconfig.WithInternalServiceDefaults(),
+			tlsconfig.WithIdentityFromFile(cfg.GRPC.CertFile, cfg.GRPC.KeyFile),
+		).Client(
+			tlsconfig.WithAuthority(certPool),
+		)
+	} else {
+		internalTlsConfig, err = tlsconfig.Build(
+			tlsconfig.WithInternalServiceDefaults(),
+		).Client(
+			tlsconfig.WithAuthority(certPool),
+		)
+	}
+
 	if err != nil {
 		log.Panicf("failed to load create tls config for http client: %s", err)
 	}

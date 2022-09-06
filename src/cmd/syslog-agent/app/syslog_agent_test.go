@@ -15,6 +15,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
 
@@ -115,6 +116,7 @@ var _ = Describe("SyslogAgent", func() {
 					KeyFile:  metronTestCerts.Key("metron"),
 				},
 				AggregateConnectionRefreshInterval: 10 * time.Minute,
+				DrainUseMtls:                       false,
 			}
 			syslogAgent := app.NewSyslogAgent(cfg, mc, testLogger)
 			go syslogAgent.Run()
@@ -682,6 +684,66 @@ var _ = Describe("SyslogAgent", func() {
 			Expect(func() { app.NewSyslogAgent(cfg, metricClient, testLogger) }).To(PanicWith("failed to configure client TLS: \"failed to load keypair: open invalid: no such file or directory\""))
 		})
 	})
+	Context("When mutual TLS is configured", func() {
+		var (
+			metricClient *metricsHelpers.SpyMetricsRegistry
+
+			grpcPort   = 40000
+			testLogger = log.New(GinkgoWriter, "", log.LstdFlags)
+
+			metronTestCerts       = testhelper.GenerateCerts("loggregatorCA")
+			syslogServerTestCerts = testhelper.GenerateCerts("syslogCA")
+		)
+
+		AfterEach(func() {
+			gexec.CleanupBuildArtifacts()
+			grpcPort++
+		})
+
+		metricClient = metricsHelpers.NewMetricsRegistry()
+
+		DescribeTable("checks the mTLS configuration", func(withMTLS int) {
+			cfg := app.Config{
+				BindingsPerAppLimit: 5,
+				MetricsServer: config.MetricsServer{
+					Port:     8052,
+					CAFile:   metronTestCerts.CA(),
+					CertFile: metronTestCerts.Cert("metron"),
+					KeyFile:  metronTestCerts.Key("metron"),
+				},
+				IdleDrainTimeout:    10 * time.Minute,
+				DrainSkipCertVerify: false,
+				DrainTrustedCAFile:  syslogServerTestCerts.CA(),
+				GRPC: app.GRPC{
+					Port:     grpcPort,
+					CAFile:   metronTestCerts.CA(),
+					CertFile: metronTestCerts.Cert("metron"),
+					KeyFile:  metronTestCerts.Key("metron"),
+				},
+				AggregateDrainURLs:                 []string{},
+				AggregateConnectionRefreshInterval: 10 * time.Minute,
+			}
+
+			switch withMTLS {
+			case 0:
+				cfg.DrainUseMtls = false
+			case 1:
+				cfg.DrainUseMtls = true
+			default:
+			}
+
+			// syslogAgent := app.NewSyslogAgent(cfg, metricClient, testLogger)
+			// Expect(syslogAgent).NotTo(BeNil())
+
+			Expect(func() { app.NewSyslogAgent(cfg, metricClient, testLogger) }).ToNot(Panic())
+
+		},
+			Entry("creates a server without mTLS with default value for the DrainUseMTLS flag", -1),
+			Entry("creates a server without mTLS", 0),
+			Entry("creates a server with mTLS", 1),
+		)
+	})
+
 })
 
 func emitLogs(ctx context.Context, grpcPort int, testCerts *testhelper.TestCerts) {
