@@ -563,6 +563,125 @@ var _ = Describe("Poller", func() {
 			Expect(bndChecker.invalidDrains).To(Equal(float64(0)))
 			Expect(bndChecker.blacklistedDrains).To(Equal(float64(0)))
 		})
+
+		Context("when both include-log-types and exclude-log-types are specified", func() {
+			It("ignores the drain and counts as invalid", func() {
+				bindings := []Binding{
+					{
+						Url: "https://test.org/drain?include-log-types=app&exclude-log-types=rtr",
+						Credentials: []Credentials{
+							{
+								Apps: []App{{Hostname: "app-hostname0", AppID: "app-id-0"}},
+							},
+						},
+					},
+				}
+
+				filteredBindings := bndChecker.checkBindings(bindings)
+
+				Expect(filteredBindings).To(BeEmpty())
+				Expect(logClient.Message()).To(ContainElement(MatchRegexp("include-log-types and exclude-log-types cannot be used at the same time")))
+				Expect(bndChecker.invalidDrains).To(BeNumerically("==", 1))
+				Expect(bndChecker.blacklistedDrains).To(BeNumerically("==", 0))
+			})
+
+			It("doesn't log the conflicting filters warning when warn is false", func() {
+				bndChecker.warn = false
+				bindings := []Binding{
+					{
+						Url: "https://test.org/drain?include-log-types=app&exclude-log-types=rtr",
+						Credentials: []Credentials{
+							{
+								Apps: []App{{Hostname: "app-hostname0", AppID: "app-id-0"}},
+							},
+						},
+					},
+				}
+				bndChecker.checkBindings(bindings)
+
+				for _, msg := range logClient.Message() {
+					Expect(msg).ToNot(MatchRegexp("include-log-types and exclude-log-types cannot be used at the same time"))
+				}
+			})
+		})
+
+		Context("when unknown log types are provided", func() {
+			It("logs a warning and ignores the drain in include mode", func() {
+				bindings := []Binding{
+					{
+						Url: "https://test.org/drain?include-log-types=app,unknown,invalid,rtr",
+						Credentials: []Credentials{
+							{
+								Apps: []App{{Hostname: "app-hostname0", AppID: "app-id-0"}},
+							},
+						},
+					},
+				}
+				filteredBindings := bndChecker.checkBindings(bindings)
+
+				Expect(filteredBindings).To(BeEmpty())
+				Expect(logClient.Message()).To(ContainElement(MatchRegexp("Unknown log types")))
+				Expect(logClient.Message()).To(ContainElement(MatchRegexp("unknown")))
+				Expect(logClient.Message()).To(ContainElement(MatchRegexp("invalid")))
+				Expect(bndChecker.invalidDrains).To(BeNumerically("==", 1))
+			})
+
+			It("logs a warning and ignores the drain in exclude mode", func() {
+				bindings := []Binding{
+					{
+						Url: "https://test.org/drain?exclude-log-types=rtr,unknown",
+						Credentials: []Credentials{
+							{
+								Apps: []App{{Hostname: "app-hostname0", AppID: "app-id-0"}},
+							},
+						},
+					},
+				}
+				filteredBindings := bndChecker.checkBindings(bindings)
+
+				Expect(filteredBindings).To(BeEmpty())
+				Expect(logClient.Message()).To(ContainElement(MatchRegexp("Unknown log types")))
+				Expect(logClient.Message()).To(ContainElement(MatchRegexp("unknown")))
+				Expect(bndChecker.invalidDrains).To(BeNumerically("==", 1))
+			})
+
+			It("logs a warning and ignores the drain when source types have spaces", func() {
+				bindings := []Binding{
+					{
+						Url: "https://test.org/drain?include-log-types=app, rtr",
+						Credentials: []Credentials{
+							{
+								Apps: []App{{Hostname: "app-hostname0", AppID: "app-id-0"}},
+							},
+						},
+					},
+				}
+				filteredBindings := bndChecker.checkBindings(bindings)
+
+				Expect(filteredBindings).To(BeEmpty())
+				Expect(logClient.Message()).To(ContainElement(MatchRegexp("Unknown log types")))
+				Expect(bndChecker.invalidDrains).To(BeNumerically("==", 1))
+			})
+
+			It("doesn't log the warning when warn is false", func() {
+				bndChecker.warn = false
+				bindings := []Binding{
+					{
+						Url: "https://test.org/drain?include-log-types=app,unknown,rtr",
+						Credentials: []Credentials{
+							{
+								Apps: []App{{Hostname: "app-hostname0", AppID: "app-id-0"}},
+							},
+						},
+					},
+				}
+				bndChecker.checkBindings(bindings)
+
+				for _, msg := range logClient.Message() {
+					Expect(msg).ToNot(MatchRegexp("Unknown log types"))
+				}
+			})
+		})
 	})
 })
 

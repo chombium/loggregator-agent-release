@@ -35,6 +35,7 @@ func (d *DrainParamParser) FetchBindings() ([]syslog.Binding, error) {
 		b.OmitMetadata = getOmitMetadata(urlParsed, d.defaultDrainMetadata)
 		b.InternalTls = getInternalTLS(urlParsed)
 		b.DrainData = getBindingType(urlParsed)
+		b.LogFilter = d.getLogFilter(urlParsed)
 
 		processed = append(processed, b)
 	}
@@ -57,6 +58,7 @@ func getOmitMetadata(url *url.URL, defaultDrainMetadata bool) bool {
 }
 
 func getBindingType(u *url.URL) syslog.DrainData {
+	// Legacy drain-type query param does not forward events
 	drainData := syslog.LOGS
 	switch u.Query().Get("drain-type") {
 	case "logs":
@@ -82,6 +84,33 @@ func getBindingType(u *url.URL) syslog.DrainData {
 		drainData = syslog.ALL
 	}
 	return drainData
+}
+
+func (d *DrainParamParser) getLogFilter(u *url.URL) *syslog.LogFilter {
+	// The log filter URL query parameters are called "include-log-types" and "exclude-log-types",
+	// so that the names are short and the naming is aligned with the docs https://docs.cloudfoundry.org/devguide/deploy-apps/streaming-logs.html#format
+	// Technically, the log type is defined in the "source_type" tag/attribute of the log messages https://github.com/cloudfoundry/loggregator-api#logmessage
+	// That is why in the code the variables and functions related to the types of logs have "source type" in the name
+	includeSourceTypes := u.Query().Get("include-log-types")
+	excludeSourceTypes := u.Query().Get("exclude-log-types")
+
+	if excludeSourceTypes != "" {
+		return d.newLogFilter(excludeSourceTypes, syslog.LogFilterModeExclude)
+	} else if includeSourceTypes != "" {
+		return d.newLogFilter(includeSourceTypes, syslog.LogFilterModeInclude)
+	}
+	return nil
+}
+
+// newLogFilter parses a URL query parameter into a LogFilter.
+// sourceTypeList is assumed to be a comma-separated list of valid source types.
+func (d *DrainParamParser) newLogFilter(sourceTypeList string, mode syslog.LogFilterMode) *syslog.LogFilter {
+	if sourceTypeList == "" {
+		return nil
+	}
+
+	set, _ := syslog.ParseSourceTypeList(sourceTypeList)
+	return syslog.NewLogFilter(set, mode)
 }
 
 func getRemoveMetadataQuery(u *url.URL) string {
